@@ -1,0 +1,77 @@
+#include <ESP8266WiFi.h>
+#include <WebSocketsClient.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// OLED config
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+const char* ssid = "HOD_Network";
+const char* password = "12345678";
+
+WebSocketsClient webSocket;
+String latestMessage = "";
+
+// WebSocket message handler
+void webSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
+    if (type == WStype_TEXT) {
+        String message = String((char*)payload);
+        Serial.printf("Message from ESP32/Web: %s\n", payload);
+        latestMessage = message;
+
+        // Display message on OLED
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(SSD1306_WHITE);
+        display.setCursor(0, 0);
+        display.println("Received:");
+        display.println(message);
+        display.display();
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+
+    // Initialize I2C on custom pins: SDA = D3 (GPIO 0), SCL = D5 (GPIO 14)
+    Wire.begin(D3, D5);
+
+    // Initialize OLED
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println("OLED init failed!");
+        while (true); // Halt on failure
+    }
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println("Connecting to WiFi...");
+    display.display();
+
+    // Connect to WiFi (ESP32 AP)
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+
+    Serial.println("\nConnected!");
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("WiFi Connected");
+    display.display();
+
+    // Connect to WebSocket
+    webSocket.begin("192.168.4.1", 80, "/ws"); // ESP32 AP IP
+    webSocket.onEvent(webSocketEvent);
+}
+
+void loop() {
+    webSocket.loop(); // Maintain WebSocket connection
+}
+

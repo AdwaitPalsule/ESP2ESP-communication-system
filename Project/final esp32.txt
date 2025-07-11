@@ -1,0 +1,142 @@
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+#include <vector>
+
+const char* ssid = "HOD_Network";
+const char* password = "12345678";
+
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+std::vector<uint32_t> teachers;
+std::vector<uint32_t> students;
+
+// Send message based on role or to all
+void sendMessage(const String& recipient, const String& message) {
+  Serial.println("Preparing to send message to: " + recipient);
+
+  if (recipient == "ALL") {
+    ws.textAll("ALL:" + message);
+  } else if (recipient == "TEACHER") {
+    Serial.println("Teacher list size: " + String(teachers.size()));
+    for (auto id : teachers) {
+      Serial.println("Sending to TEACHER ID: " + String(id));
+      ws.text(id, "TEACHER:" + message);
+    }
+  } else if (recipient == "STUDENT") {
+    Serial.println("Student list size: " + String(students.size()));
+    for (auto id : students) {
+      Serial.println("Sending to STUDENT ID: " + String(id));
+      ws.text(id, "STUDENT:" + message);
+    }
+  }
+}
+
+// Handle incoming WebSocket messages
+void onWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client) {
+  AwsFrameInfo *info = (AwsFrameInfo*)arg;
+  if (info->final && info->opcode == WS_TEXT) {
+    data[len] = '\0';
+    String msg = String((char*)data);
+    Serial.println("Received: " + msg);
+
+    if (msg.startsWith("REGISTER:")) {
+      String role = msg.substring(9);
+      role.trim();
+      Serial.println("Received registration: " + role);
+
+      if (role == "TEACHER") {
+        if (!std::count(teachers.begin(), teachers.end(), client->id())) {
+          teachers.push_back(client->id());
+          Serial.println("Registered TEACHER: " + String(client->id()));
+        }
+      } else if (role == "STUDENT") {
+        if (!std::count(students.begin(), students.end(), client->id())) {
+          students.push_back(client->id());
+          Serial.println("Registered STUDENT: " + String(client->id()));
+        }
+      } else {
+        Serial.println("Unknown role: " + role);
+      }
+      return;
+    }
+
+    // Handle message sending
+    if (msg.startsWith("SEND:")) {
+      int firstColon = msg.indexOf(':');
+      int secondColon = msg.indexOf(':', firstColon + 1);
+
+      if (firstColon > 0 && secondColon > firstColon) {
+        String recipient = msg.substring(firstColon + 1, secondColon);
+        String content = msg.substring(secondColon + 1);
+        sendMessage(recipient, content);
+        Serial.println("Message to " + recipient + ": " + content);
+      }
+    }
+  }
+}
+
+// HTML Web UI
+String getWebPage() {
+  return R"rawliteral(
+  <!DOCTYPE html>
+  <html>
+  <head>
+    <title>HOD Messaging</title>
+    <style>
+      body { font-family: Arial; background: #f2f2f2; display: flex; justify-content: center; align-items: center; height: 100vh; }
+      .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); width: 320px; text-align: center; }
+      select, input, button { width: 100%; padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid #ccc; }
+      button { background: #007BFF; color: white; border: none; font-size: 16px; cursor: pointer; }
+      button:hover { background-color: #0056b3; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h2>HOD Messaging</h2>
+      <select id="recipient">
+        <option value="ALL">Broadcast</option>
+        <option value="TEACHER">Teachers</option>
+        <option value="STUDENT">Students</option>
+      </select>
+      <input type="text" id="msg" placeholder="Enter your message">
+      <button onclick="sendMessage()">Send</button>
+    </div>
+    <script>
+      let ws = new WebSocket('ws://' + location.host + '/ws');
+      function sendMessage() {
+        let recipient = document.getElementById('recipient').value;
+        let msg = document.getElementById('msg').value;
+        ws.send('SEND:' + recipient + ':' + msg);
+      }
+    </script>
+  </body>
+  </html>
+  )rawliteral";
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  WiFi.softAP(ssid, password);
+  Serial.println("AP Started. IP: " + WiFi.softAPIP().toString());
+
+  ws.onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client,
+                AwsEventType type, void *arg, uint8_t *data, size_t len) {
+    if (type == WS_EVT_DATA) {
+      onWebSocketMessage(arg, data, len, client);
+    }
+  });
+
+  server.addHandler(&ws);
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", getWebPage());
+  });
+
+  server.begin();
+}
+
+void loop() {
+  ws.cleanupClients();  // Clean up disconnected clients
+}

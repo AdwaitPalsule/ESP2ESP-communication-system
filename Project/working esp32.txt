@@ -1,0 +1,61 @@
+#include <ESP8266WiFi.h>
+#include <WebSocketsClient.h>
+
+const char* ssid = "HOD_Network";
+const char* password = "12345678";
+
+// Change role to either "TEACHER" or "STUDENT"
+const char* role = "TEACHER";
+
+WebSocketsClient webSocket;
+
+void webSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
+  switch (type) {
+    case WStype_CONNECTED: {
+      Serial.println("WebSocket connected!");
+      String registerMsg = "REGISTER:" + String(role);
+      webSocket.sendTXT(registerMsg);
+      break;
+    }
+
+    case WStype_TEXT: {
+      String msg = String((char*)payload);
+      Serial.printf("Raw received: %s\n", msg.c_str());
+
+      if (msg.startsWith("ALL:")) {
+        Serial.print("Message to ALL: ");
+        Serial.println(msg.substring(4));
+      } else if (msg.startsWith(String(role) + ":")) {
+        Serial.print("Message to ");
+        Serial.print(role);
+        Serial.print(": ");
+        Serial.println(msg.substring(strlen(role) + 1));
+      }
+      break;
+    }
+
+    case WStype_DISCONNECTED: {
+      Serial.println("WebSocket disconnected");
+      break;
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi");
+
+  webSocket.begin("192.168.4.1", 80, "/ws");
+  webSocket.onEvent(webSocketEvent);
+  webSocket.setReconnectInterval(3000);
+}
+
+void loop() {
+  webSocket.loop();
+}

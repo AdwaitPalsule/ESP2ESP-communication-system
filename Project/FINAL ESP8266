@@ -1,0 +1,121 @@
+#include <ESP8266WiFi.h>
+#include <WebSocketsClient.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// OLED config
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// I2C pins for your wiring
+// SDA = D2 (GPIO4), SCL = D1 (GPIO5)
+#define SDA_PIN D2
+#define SCL_PIN D1
+
+const char* ssid = "HOD_Network";
+const char* password = "12345678";
+
+// Change this to TEACHER or STUDENT
+const char* role = "TEACHER";
+
+WebSocketsClient webSocket;
+String latestMessage = "";
+
+// WebSocket handler
+void webSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
+    switch (type) {
+
+        case WStype_CONNECTED:
+            Serial.println("WebSocket Connected!");
+
+            // Register this device
+            {
+                String regMsg = "REGISTER:" + String(role);
+                webSocket.sendTXT(regMsg);
+            }
+
+            // OLED
+            display.clearDisplay();
+            display.setTextSize(1);
+            display.setTextColor(SSD1306_WHITE);
+            display.setCursor(0, 0);
+            display.println("WebSocket Connected!");
+            display.println("Role: " + String(role));
+            display.display();
+            break;
+
+        case WStype_TEXT: {
+            String message = String((char*)payload);
+            Serial.printf("Received: %s\n", payload);
+
+            latestMessage = message;
+
+            display.clearDisplay();
+            display.setTextSize(1);
+            display.setTextColor(SSD1306_WHITE);
+            display.setCursor(0, 0);
+            display.println("Received:");
+            display.println(message);
+            display.display();
+            break;
+        }
+
+        case WStype_DISCONNECTED:
+            Serial.println("WebSocket Disconnected!");
+
+            display.clearDisplay();
+            display.setCursor(0, 0);
+            display.println("WS Disconnected");
+            display.display();
+            break;
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+
+    // Start I2C
+    Wire.begin(SDA_PIN, SCL_PIN);
+
+    // Init OLED
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println("OLED init failed!");
+        while (1);
+    }
+
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(0, 0);
+    display.println("Connecting to WiFi...");
+    display.display();
+
+    // Connect to ESP32 Access Point
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(300);
+        Serial.print(".");
+    }
+
+    Serial.println("\nWiFi Connected!");
+    display.clearDisplay();
+    display.setCursor(0, 0);
+    display.println("WiFi Connected!");
+    display.println(WiFi.localIP());
+    display.display();
+
+    // Connect to WebSocket server on ESP32
+    webSocket.begin("192.168.4.1", 80, "/ws");
+
+    // Auto reconnect
+    webSocket.setReconnectInterval(3000);
+
+    webSocket.onEvent(webSocketEvent);
+}
+
+void loop() {
+    webSocket.loop();
+}
